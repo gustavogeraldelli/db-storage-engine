@@ -641,8 +641,7 @@ bool inverted_list_secondary_search(int *result, bool exibir_caminho, char *chav
  * @param t Ponteiro para o índice do tipo Lista invertida no qual será buscada a chave.
  * @return Indica a quantidade de chaves encontradas.
  */
-int inverted_list_primary_search(char result[][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX], bool exibir_caminho, int indice, int *indice_final, inverted_list *t);
- 
+int inverted_list_primary_search(char result[][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX + 1], bool exibir_caminho, int indice, int *indice_final, inverted_list *t); 
 /**
  * Preenche uma string str com o caractere pad para completar o tamanho size.<br />
  *
@@ -1491,19 +1490,22 @@ void buscar_curso_titulo_menu(char *titulo) {
  
 /* Listagem */
 void listar_usuarios_id_menu() {
-    /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
     if (qtd_registros_usuarios == 0) {
         printf(AVISO_NENHUM_REGISTRO_ENCONTRADO);
         return;
     }
 
-    for (int i = 0; i < qtd_registros_usuarios; i++) {
-        Usuario u = recuperar_registro_usuario(i);
-        if (!strncmp(u.id_usuario, "*|", 2)) // registro excluido
+    bool exibiu = false;
+    for (unsigned i = 0; i < qtd_registros_usuarios; i++) {
+        if (usuarios_idx[i].rrn == -1)
             continue;
-        else
-            exibir_usuario(usuarios_idx[i].rrn);
+
+        exibir_usuario(usuarios_idx[i].rrn);
+        exibiu = true;
     }
+
+    if (!exibiu)
+        printf(AVISO_NENHUM_REGISTRO_ENCONTRADO);
 }
  
 void listar_cursos_categorias_menu(char *categoria) {
@@ -1520,7 +1522,7 @@ void listar_cursos_categorias_menu(char *categoria) {
         printf(AVISO_NENHUM_REGISTRO_ENCONTRADO);
     else {
         int qtd_cursos_na_categoria = inverted_list_primary_search(NULL, false, primeiro_indice, NULL, &categorias_idx); // contagem para criação de um vetor de tamanho correto
-        char ids[qtd_cursos_na_categoria][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX];
+        char ids[qtd_cursos_na_categoria][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX + 1];
         
         inverted_list_primary_search(ids, true, primeiro_indice, NULL, &categorias_idx); // populando o vetor 'ids' criado
 
@@ -1807,7 +1809,7 @@ bool inverted_list_secondary_search(int *result, bool exibir_caminho, char *chav
         return false;
 }
  
-int inverted_list_primary_search(char result[][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX], bool exibir_caminho, int indice, int *indice_final, inverted_list *t) {
+int inverted_list_primary_search(char result[][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX + 1], bool exibir_caminho, int indice, int *indice_final, inverted_list *t) {
     /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
     int i = 0; // contador
 
@@ -1818,14 +1820,15 @@ int inverted_list_primary_search(char result[][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX
         if (exibir_caminho)
             printf(" %d", indice);
 
-        if (result != NULL) 
-            strncpy(result[i], t->categorias_primario_idx[indice].chave_primaria, 8);
+        if (result != NULL) {
+            strncpy(result[i], t->categorias_primario_idx[indice].chave_primaria, t->tam_chave_primaria);
+            result[i][t->tam_chave_primaria] = '\0';
+        }
 
         if (indice_final != NULL)
             *indice_final = indice;
 
         indice = t->categorias_primario_idx[indice].proximo_indice;
-
         i++;
     }
 
@@ -1863,22 +1866,33 @@ void* busca_binaria(const void *key, const void *base0, size_t nmemb, size_t siz
     // https://stackoverflow.com/a/56978777
     // https://www.geeksforgeeks.org/find-first-and-last-positions-of-an-element-in-a-sorted-array/
 
-    const void *p;
+    const char *base = base0;
+    const char *p = NULL;
     int l = 0;
-    int r = nmemb - 1;
-    int m;
-    int cmp;
+    int r;
+    int m = 0;
+    int cmp = 0;
     int encontrado = -1;
 
     if (exibir_caminho)
         printf(REGS_PERCORRIDOS);
 
+    if (nmemb == 0) {
+        if (exibir_caminho)
+            printf("\n");
+        return NULL;
+    }
+
+    r = (int) nmemb - 1;
+
     while (l <= r) {
-        m = l + (r - l + 1)/2;
-        p = base0 + m * size;
+        m = l + (r - l + 1) / 2;
+        p = base + m * size;
         cmp = compar(key, p);
+
         if (exibir_caminho && (encontrado == -1 || cmp == 0))
             printf(" %d", m);
+
         if (cmp == 0) {
             encontrado = m;
             r = m - 1;
@@ -1892,40 +1906,38 @@ void* busca_binaria(const void *key, const void *base0, size_t nmemb, size_t siz
     if (exibir_caminho)
         printf("\n");
 
-    if (encontrado != -1) {
-        p = base0 + encontrado * size;
+    if (encontrado != -1)
+        return (void *) (base + encontrado * size);
+        
+    // chave correta não encontrada
+
+    if (retorno_se_nao_encontrado == 0)
+        return NULL;
+
+    p = base + m * size;
+    cmp = compar(key, p);
+
+    // 3 casos possiveis 
+    // - nao existe sucessor/antecessor
+    // - m está no lugar certo (sucessor ou antecessor)
+    // - m está apontando para um lugar 1 posição a frente/atras do que seria o ideal
+        
+    // CASO SUCESSOR
+    if (retorno_se_nao_encontrado == 1) {
+        if (cmp > 0 && (size_t) m == nmemb - 1) // nao existe sucessor da chave dada
+            return NULL;
+        if (cmp > 0) // m é o indice do predecessor da chave, o proximo seria o correto
+            p += size;
+
         return (void*)p;
     }
-    else { // chave correta não encontrada
-        if (retorno_se_nao_encontrado == 0)
-            return NULL;
 
-        p = base0 + m * size;
-        cmp = compar(key, p);
+    // CASO ANTECESSOR
+    if (cmp < 0 && m == 0) // nao existe antecessor da chave dada
+        return NULL;
+    if (cmp < 0) // m é o indice do sucessor da chave, o anterior seria o correto
+        p -= size;
 
-        // 3 casos possiveis 
-        // - nao existe sucessor/antecessor
-        // - m está no lugar certo (sucessor ou antecessor)
-        // - m está apontando para um lugar 1 posição a frente/atras do que seria o ideal
-            
-        if (retorno_se_nao_encontrado == 1) { // CASO SUCESSOR
+    return (void*)p;
 
-            if (cmp > 0 && m == nmemb - 1) // nao existe sucessor da chave dada
-                return NULL;
-            else if (cmp > 0) // m é o indice do predecessor da chave, o proximo seria o correto
-                p += size;
-
-            return (void*)p;
-        }
-
-        else { // CASO ANTECESSOR
-
-            if (cmp < 0 && m == 0) // nao existe antecessor da chave dada
-                return NULL;
-            else if (cmp < 0) // m é o indice do sucessor da chave, o anterior seria o correto
-                p -= size;
-
-            return (void*)p;
-        }
-    }
 }
