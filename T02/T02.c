@@ -785,17 +785,6 @@ void btree_delete(char *chave, btree *t);
 bool btree_delete_aux(char *chave, int rrn, btree *t);
 
 /**
- * Função auxiliar para redistribuir ou concatenar nós irmãos adjacentes à esquerda e à direita de um nó pai em uma Árvore-B (T). 
- * Atualiza os parâmetros conforme necessário.<br />
- *
- * @param node Ponteiro para nó pai dos nós irmãos adjacentes que deve ser redistribuidos ou concatenados. 
- * @param i O índice da posição no nó pai onde se encontra a chave separadora dos nós irmãos adjacentes.
- * @param t Ponteiro para o índice do tipo Árvore-B no qual serão redistribuídos ou concatenados os nós irmãos adjacentes.
- * @return Indica se a redistribuição ou concatenação deixou o nó pai com menos chaves que o mínimo necessário.
- */
-bool btree_borrow_or_merge(btree_node *node, int i, btree *t);
-
-/**
  * Responsável por buscar uma chave (k) em uma Árvore-B (T). O valor de retorno indica se a chave foi encontrada ou não.
  * O ponteiro para a string result pode ser fornecido opcionalmente, e conterá o resultado encontrado.<br />
  * Esta é uma função recursiva. O parâmetro rrn recebe a raíz da Árvore-B na primeira chamada, e nas chamadas
@@ -928,7 +917,6 @@ int btree_register_size(btree *t);
  * @param size Tamanho desejado para a string.
  */
 char* strpadright(char *str, char pad, unsigned size);
-void strupperpad(char *dest, const char *src, unsigned size);
 
 /**
  * Converte uma string str para letras maiúsculas.<br />
@@ -945,8 +933,15 @@ char* strupr(char *str);
 char* strlower(char *str);
  
 /* <<< COLOQUE AQUI OS DEMAIS PROTÓTIPOS DE FUNÇÕES, SE NECESSÁRIO >>> */
+void strupperpad(char *dest, const char *src, unsigned size);
 
- 
+int btree_min_keys();
+void btree_find_predecessor(char *result, int rrn, btree *t);
+void btree_find_successor(char *result, int rrn, btree *t);
+void btree_rotate_from_left(btree_node *parent, int child_index, btree *t);
+void btree_rotate_from_right(btree_node *parent, int child_index, btree *t);
+int btree_merge_children(btree_node *parent, int left_index, btree *t);
+
 /* ==========================================================================
  * ============================ FUNÇÃO PRINCIPAL ============================
  * =============================== NÃO ALTERAR ============================== */
@@ -2201,27 +2196,41 @@ promovido_aux btree_divide(promovido_aux promo, btree_node *node, int i, btree *
     return promo;
 }
 
+int btree_min_keys() {
+    return ((btree_order + 1) / 2) - 1;
+}
+
 void btree_delete(char *chave, btree *t) {
     /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
-    bool underflow_raiz = btree_delete_aux(chave, t->rrn_raiz, t);
-    btree_node no = btree_read(t->rrn_raiz, t);
-    if (underflow_raiz && no.qtd_chaves == 0) { // diminui um nivel da altura
-        t->rrn_raiz = no.filhos[0];
-        for (int j = 0; j < btree_order; j++)
-            no.filhos[j] = -1;
-        btree_write(no, t);
+    if (t->rrn_raiz == -1)
+        return;
+
+    btree_delete_aux(chave, t->rrn_raiz, t);
+
+    btree_node raiz = btree_read(t->rrn_raiz, t);
+    if (raiz.qtd_chaves == 0) { // diminui a altura quando a raiz fica vazia
+        if (raiz.folha)
+            t->rrn_raiz = -1;
+        else {
+            t->rrn_raiz = raiz.filhos[0];
+            for (int j = 0; j < btree_order; j++)
+                raiz.filhos[j] = -1;
+            btree_write(raiz, t);
+        }
     }
 
-    btree_node_free(no);
+    btree_node_free(raiz);
 }
 
 bool btree_delete_aux(char *chave, int rrn, btree *t) {
     /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
+    if (rrn == -1)
+        return false;
+
     int i;
     btree_node no = btree_read(rrn, t);
-
-    bool underflow;
     bool encontrada = btree_binary_search(&i, false, chave, &no, t);
+
     if (encontrada) { // chave está no nó atual
         if (no.folha) {
             for (int j = i; j < no.qtd_chaves - 1; j++)
@@ -2229,155 +2238,207 @@ bool btree_delete_aux(char *chave, int rrn, btree *t) {
             no.chaves[no.qtd_chaves-1][0] = '\0';
             no.qtd_chaves--;
             btree_write(no, t);
-            underflow = no.qtd_chaves < ((btree_order + 1) / 2) - 1;
         }
-        else { // trocar com predecessor, continuar recursão até chegar na nova localização da chave
-            char temp[t->tam_chave + 1];
-            strcpy(temp, chave);
-            int rrn_pred = no.filhos[i];
-            btree_node no_pred;
-            while (rrn_pred != -1) {
-                no_pred = btree_read(rrn_pred, t);
-                rrn_pred = no_pred.filhos[no_pred.qtd_chaves];
-                if (rrn_pred != -1)
-                    btree_node_free(no_pred);
-            }
-            strcpy(no.chaves[i], no_pred.chaves[no_pred.qtd_chaves-1]);
-            strcpy(no_pred.chaves[no_pred.qtd_chaves-1], temp);
-
+        else { // troca por predecessor e remove a chave deslocada na subárvore esquerda
+            char predecessor[t->tam_chave + 1];
+            btree_find_predecessor(predecessor, no.filhos[i], t);
+            strcpy(no.chaves[i], predecessor);
             btree_write(no, t);
-            btree_write(no_pred, t);
-            btree_node_free(no_pred);
-            underflow = btree_delete_aux(chave, no.filhos[i], t);
+
+            bool underflow = btree_delete_aux(predecessor, no.filhos[i], t);
+            if (underflow) { // filho esquerdo ficou abaixo do mínimo
+                bool corrigido = false;
+                if (i < no.qtd_chaves) {
+                    btree_node direito = btree_read(no.filhos[i+1], t);
+                    if (direito.qtd_chaves > btree_min_keys()) {
+                        btree_rotate_from_right(&no, i, t);
+                        corrigido = true;
+                    }
+                    btree_node_free(direito);
+                }
+                if (!corrigido && i > 0) {
+                    btree_node esquerdo = btree_read(no.filhos[i-1], t);
+                    if (esquerdo.qtd_chaves > btree_min_keys()) {
+                        btree_rotate_from_left(&no, i, t);
+                        corrigido = true;
+                    }
+                    btree_node_free(esquerdo);
+                }
+                if (!corrigido) { // nenhum irmão pode emprestar, então concatena
+                    if (i < no.qtd_chaves)
+                        btree_merge_children(&no, i, t);
+                    else if (i > 0)
+                        btree_merge_children(&no, i-1, t);
+                }
+            }
         }
-        
     }
-    else // continuando recursão
-        underflow = btree_delete_aux(chave, no.filhos[i], t);
-    
-    // se foi detectado underflow na volta de alguma chamada, fazer empréstimo ou juntar nós
-    if (underflow) 
-        underflow = btree_borrow_or_merge(&no, i, t); // pode retornar underflow novamente para a chamada anterior à que foi feita
-        
+    else if (!no.folha) { // continua a busca na subárvore adequada
+        bool underflow = btree_delete_aux(chave, no.filhos[i], t);
+
+        if (underflow) { // tenta redistribuir antes de concatenar
+            bool corrigido = false;
+            if (i < no.qtd_chaves) {
+                btree_node direito = btree_read(no.filhos[i+1], t);
+                if (direito.qtd_chaves > btree_min_keys()) {
+                    btree_rotate_from_right(&no, i, t);
+                    corrigido = true;
+                }
+                btree_node_free(direito);
+            }
+            if (!corrigido && i > 0) {
+                btree_node esquerdo = btree_read(no.filhos[i-1], t);
+                if (esquerdo.qtd_chaves > btree_min_keys()) {
+                    btree_rotate_from_left(&no, i, t);
+                    corrigido = true;
+                }
+                btree_node_free(esquerdo);
+            }
+            if (!corrigido) { // nenhum irmão pode emprestar, então concatena
+                if (i < no.qtd_chaves)
+                    btree_merge_children(&no, i, t);
+                else if (i > 0)
+                    btree_merge_children(&no, i-1, t);
+            }
+        }
+    }
+
     btree_write(no, t);
+    bool underflow = no.this_rrn != t->rrn_raiz && no.qtd_chaves < btree_min_keys();
     btree_node_free(no);
     return underflow;
 }
 
-bool btree_borrow_or_merge(btree_node *node, int i, btree *t) {
-    /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
-    int rrn_pred, rrn_suc;
-    if (i == 0) {
-        rrn_pred = -1;
-        rrn_suc = node->filhos[i+1];
-    }
-    else if (i == node->qtd_chaves) {
-        rrn_pred = node->filhos[i-1];
-        rrn_suc = btree_order;
-    }
-    else {
-        rrn_pred = node->filhos[i-1];
-        rrn_suc = node->filhos[i+1];
+void btree_find_predecessor(char *result, int rrn, btree *t) {
+    btree_node no = btree_read(rrn, t);
+
+    while (!no.folha) { // caminha sempre para o filho mais à direita
+        int prox_rrn = no.filhos[no.qtd_chaves];
+        btree_node_free(no);
+        no = btree_read(prox_rrn, t);
     }
 
-    btree_node no_underflow = btree_read(node->filhos[i], t);
+    strcpy(result, no.chaves[no.qtd_chaves-1]);
+    btree_node_free(no);
+}
 
-    if (rrn_suc < btree_order && rrn_suc != -1) { // tem filho direito
-        btree_node no_direito = btree_read(rrn_suc, t);
-        if (no_direito.qtd_chaves > ((btree_order + 1) / 2) - 1) { // pode emprestar
-            char chave_suc[t->tam_chave + 1];
-            strcpy(chave_suc, no_direito.chaves[0]);
-            for (int j = 0; j < no_direito.qtd_chaves - 1; j++)
-                strcpy(no_direito.chaves[j], no_direito.chaves[j+1]);
-            no_direito.chaves[no_direito.qtd_chaves-1][0] = '\0';
-            no_direito.qtd_chaves--;
-            strcpy(no_underflow.chaves[no_underflow.qtd_chaves], node->chaves[i]);
-            no_underflow.qtd_chaves++;
-            strcpy(node->chaves[i], chave_suc);
+void btree_find_successor(char *result, int rrn, btree *t) {
+    btree_node no = btree_read(rrn, t);
 
-            btree_write(no_underflow, t);
-            btree_write(no_direito, t);
-            btree_node_free(no_underflow);
-            btree_node_free(no_direito);
-            return false;
+    while (!no.folha) { // caminha sempre para o filho mais à esquerda
+        int prox_rrn = no.filhos[0];
+        btree_node_free(no);
+        no = btree_read(prox_rrn, t);
+    }
+
+    strcpy(result, no.chaves[0]);
+    btree_node_free(no);
+}
+
+void btree_rotate_from_left(btree_node *parent, int child_index, btree *t) {
+    btree_node esquerdo = btree_read(parent->filhos[child_index-1], t);
+    btree_node filho = btree_read(parent->filhos[child_index], t);
+
+    // abre espaço no início do filho em underflow
+    for (int j = filho.qtd_chaves; j > 0; j--)
+        strcpy(filho.chaves[j], filho.chaves[j-1]);
+
+    if (!filho.folha) {
+        for (int j = filho.qtd_chaves + 1; j > 0; j--)
+            filho.filhos[j] = filho.filhos[j-1];
+        filho.filhos[0] = esquerdo.filhos[esquerdo.qtd_chaves];
+        esquerdo.filhos[esquerdo.qtd_chaves] = -1;
+    }
+
+    // chave do pai desce e maior chave do irmão esquerdo sobe
+    strcpy(filho.chaves[0], parent->chaves[child_index-1]);
+    strcpy(parent->chaves[child_index-1], esquerdo.chaves[esquerdo.qtd_chaves-1]);
+    esquerdo.chaves[esquerdo.qtd_chaves-1][0] = '\0';
+
+    esquerdo.qtd_chaves--;
+    filho.qtd_chaves++;
+
+    btree_write(esquerdo, t);
+    btree_write(filho, t);
+    btree_write(*parent, t);
+
+    btree_node_free(esquerdo);
+    btree_node_free(filho);
+}
+
+void btree_rotate_from_right(btree_node *parent, int child_index, btree *t) {
+    btree_node filho = btree_read(parent->filhos[child_index], t);
+    btree_node direito = btree_read(parent->filhos[child_index+1], t);
+
+    // chave do pai desce no fim do filho em underflow
+    strcpy(filho.chaves[filho.qtd_chaves], parent->chaves[child_index]);
+
+    if (!filho.folha) {
+        filho.filhos[filho.qtd_chaves+1] = direito.filhos[0];
+        for (int j = 0; j < direito.qtd_chaves; j++)
+            direito.filhos[j] = direito.filhos[j+1];
+        direito.filhos[direito.qtd_chaves] = -1;
+    }
+
+    // menor chave do irmão direito sobe para o pai
+    strcpy(parent->chaves[child_index], direito.chaves[0]);
+    for (int j = 0; j < direito.qtd_chaves - 1; j++)
+        strcpy(direito.chaves[j], direito.chaves[j+1]);
+    direito.chaves[direito.qtd_chaves-1][0] = '\0';
+
+    filho.qtd_chaves++;
+    direito.qtd_chaves--;
+
+    btree_write(filho, t);
+    btree_write(direito, t);
+    btree_write(*parent, t);
+
+    btree_node_free(filho);
+    btree_node_free(direito);
+}
+
+int btree_merge_children(btree_node *parent, int left_index, btree *t) {
+    btree_node esquerdo = btree_read(parent->filhos[left_index], t);
+    btree_node direito = btree_read(parent->filhos[left_index+1], t);
+    int rrn_concatenado = esquerdo.this_rrn;
+
+    // chave separadora do pai entra entre os dois irmãos
+    strcpy(esquerdo.chaves[esquerdo.qtd_chaves], parent->chaves[left_index]);
+    esquerdo.qtd_chaves++;
+
+    for (int j = 0; j < direito.qtd_chaves; j++) {
+        strcpy(esquerdo.chaves[esquerdo.qtd_chaves], direito.chaves[j]);
+        esquerdo.qtd_chaves++;
+        direito.chaves[j][0] = '\0';
+    }
+
+    if (!esquerdo.folha) {
+        int pos = esquerdo.qtd_chaves - direito.qtd_chaves;
+        for (int j = 0; j <= direito.qtd_chaves; j++) {
+            esquerdo.filhos[pos+j] = direito.filhos[j];
+            direito.filhos[j] = -1;
         }
-        btree_node_free(no_direito);
     }
 
-    if (rrn_pred >= 0 && rrn_pred != -1) { // tem filho esquerdo
-        btree_node no_esquerdo = btree_read(rrn_pred, t);
-        if (no_esquerdo.qtd_chaves > ((btree_order + 1) / 2) - 1) { // pode emprestar
-            char chave_pred[t->tam_chave + 1];
-            strcpy(chave_pred, no_esquerdo.chaves[no_esquerdo.qtd_chaves-1]);
-            no_esquerdo.chaves[no_esquerdo.qtd_chaves-1][0] = '\0';
-            no_esquerdo.qtd_chaves--;
-            for (int j = no_underflow.qtd_chaves; j > 0; j--)
-                strcpy(no_underflow.chaves[j], no_underflow.chaves[j-1]);
-            strcpy(no_underflow.chaves[0], node->chaves[i-1]);
-            no_underflow.qtd_chaves++;
-            strcpy(node->chaves[i-1], chave_pred);
+    direito.qtd_chaves = 0;
 
-            btree_write(no_underflow, t);
-            btree_write(no_esquerdo, t);
-            btree_node_free(no_esquerdo);
-            btree_node_free(no_underflow);
-            return false;
-        }
-        btree_node_free(no_esquerdo);
+    // remove do pai a chave que desceu e o ponteiro para o irmão direito
+    for (int j = left_index; j < parent->qtd_chaves - 1; j++) {
+        strcpy(parent->chaves[j], parent->chaves[j+1]);
+        parent->filhos[j+1] = parent->filhos[j+2];
     }
+    parent->chaves[parent->qtd_chaves-1][0] = '\0';
+    parent->filhos[parent->qtd_chaves] = -1;
+    parent->qtd_chaves--;
 
-    /* Não conseguiu empréstimo, resta a concataneção */
-    if (rrn_suc < btree_order && rrn_suc != -1) { // consegue concatenar com nó direito
-        strcpy(no_underflow.chaves[no_underflow.qtd_chaves], node->chaves[i]);
-        no_underflow.qtd_chaves++;
-        for (int j = i; i < node->qtd_chaves - 1; i++) {
-            strcpy(node->chaves[j], node->chaves[j+1]);
-            node->filhos[j+1] = node->filhos[j+2];
-            node->filhos[j+2] = -1;
-        }
-        node->chaves[node->qtd_chaves-1][0] = '\0';
-        node->qtd_chaves--;
-        btree_node no_direito = btree_read(rrn_suc, t);
-        for (int j = 0; no_direito.qtd_chaves > 0; j++) {
-            strcpy(no_underflow.chaves[no_underflow.qtd_chaves], no_direito.chaves[j]);
-            no_underflow.qtd_chaves++;
-            no_direito.qtd_chaves--;
-            no_direito.chaves[j][0] = '\0';
-        }
+    btree_write(esquerdo, t);
+    btree_write(direito, t);
+    btree_write(*parent, t);
 
-        btree_write(no_underflow, t);
-        btree_write(no_direito, t);
-        btree_node_free(no_direito);
-    }
-    else if (rrn_pred >= 0 && rrn_pred != -1) { // consegue concatenar com nó esquerdo
-        btree_node no_esquerdo = btree_read(rrn_pred, t);
-        for (int j = 0; no_esquerdo.qtd_chaves > 0; j++) {
-            strcpy(no_underflow.chaves[no_underflow.qtd_chaves], no_esquerdo.chaves[j]);
-            no_underflow.qtd_chaves++;
-            no_esquerdo.qtd_chaves--;
-            no_esquerdo.chaves[j][0] = '\0';
-        }
-        strcpy(no_underflow.chaves[no_underflow.qtd_chaves], node->chaves[i]);
-        no_underflow.qtd_chaves++;
-        node->chaves[i][0] = '\0';
-        for (int j = i; i < node->qtd_chaves - 1; i++) {
-            strcpy(node->chaves[j], node->chaves[j+1]);
-            node->filhos[j+1] = node->filhos[j+2];
-            node->filhos[j+2] = -1;
-        }
-        node->qtd_chaves--;
-        
-        btree_write(no_underflow, t);
-        btree_write(no_esquerdo, t);
-        btree_node_free(no_esquerdo);
-    }
+    btree_node_free(esquerdo);
+    btree_node_free(direito);
 
-    if (node->this_rrn != t->rrn_raiz && node->qtd_chaves == 0)
-        for (int j = 0; j < btree_order; j++)
-            node->filhos[j] = -1;
-
-    btree_node_free(no_underflow);
-    return node->qtd_chaves < ((btree_order + 1) / 2) - 1;
+    return rrn_concatenado;
 }
 
 bool btree_search(char *result, bool exibir_caminho, char *chave, int rrn, btree *t) {
@@ -2459,15 +2520,15 @@ bool btree_print_in_order(char *chave_inicio, char *chave_fim, bool (*exibir)(ch
     for (; i < no.qtd_chaves; i++) {
         if (!no.folha)
             imprimiu = btree_print_in_order(chave_inicio, chave_fim, exibir, no.filhos[i], t) || imprimiu;
+
         if (!chave_inicio && !chave_fim) {
             exibir(no.chaves[i]);
             imprimiu = true;
         }
-        else
-            if (t->compar(no.chaves[i], chave_inicio) >= 0 && t->compar(no.chaves[i], chave_fim) <= 0) {
-                exibir(no.chaves[i]);
-                imprimiu = true;
-            }
+        else if (t->compar(no.chaves[i], chave_inicio) >= 0 && t->compar(no.chaves[i], chave_fim) <= 0) {
+            exibir(no.chaves[i]);
+            imprimiu = true;
+        }
     }
 
     if (!no.folha)
