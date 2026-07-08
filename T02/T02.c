@@ -695,7 +695,7 @@ bool inverted_list_secondary_search(int *result, bool exibir_caminho, char *chav
  * @param t Ponteiro para o índice do tipo Lista invertida no qual será buscada a chave.
  * @return Indica a quantidade de chaves encontradas.
  */
-int inverted_list_primary_search(char result[][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX], bool exibir_caminho, int indice, int *indice_final, inverted_list *t);
+int inverted_list_primary_search(char result[][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX + 1], bool exibir_caminho, int indice, int *indice_final, inverted_list *t);
 
 /**
  * Responsável por buscar uma chave (k) dentre os registros secundários de uma Lista Invertida de forma eficiente.<br />
@@ -928,6 +928,7 @@ int btree_register_size(btree *t);
  * @param size Tamanho desejado para a string.
  */
 char* strpadright(char *str, char pad, unsigned size);
+void strupperpad(char *dest, const char *src, unsigned size);
 
 /**
  * Converte uma string str para letras maiúsculas.<br />
@@ -1469,15 +1470,16 @@ void cadastrar_curso_menu(char *titulo, char *instituicao, char *ministrante, ch
     char titulo_sem_caps[TAM_MAX_TITULO];
     strcpy(titulo_sem_caps, titulo);
 
-    bool titulo_buscado = btree_search(NULL, false, strupr(titulo), titulo_idx.rrn_raiz, &titulo_idx);
+    char titulo_busca[TAM_MAX_TITULO];
+    strupperpad(titulo_busca, titulo, TAM_MAX_TITULO - 1);
+    bool titulo_buscado = btree_search(NULL, false, titulo_busca, titulo_idx.rrn_raiz, &titulo_idx);
 
     if (titulo_buscado) {
         printf(ERRO_PK_REPETIDA, titulo_sem_caps);
     }
     else {
         char titulo_padding[TAM_MAX_TITULO];
-        strcpy(titulo_padding, titulo);
-        strpadright(titulo_padding, '#', TAM_MAX_TITULO - 1);
+        strupperpad(titulo_padding, titulo, TAM_MAX_TITULO - 1);
         char chave_curso[TAM_CHAVE_CURSOS_IDX + 1];
         char chave_titulo[TAM_CHAVE_TITULO_IDX + 1];
         sprintf(chave_curso, "%08d%04d", qtd_registros_cursos, qtd_registros_cursos);
@@ -1582,7 +1584,9 @@ void inscrever_menu(char *id_curso, char *id_usuario) {
 void cadastrar_categoria_menu(char* titulo, char* categoria) {
     /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
     char chave_titulo[TAM_CHAVE_TITULO_IDX + 1];
-    bool titulo_buscado = btree_search(chave_titulo, false, strupr(titulo), titulo_idx.rrn_raiz, &titulo_idx);
+    char titulo_busca[TAM_MAX_TITULO];
+    strupperpad(titulo_busca, titulo, TAM_MAX_TITULO - 1);
+    bool titulo_buscado = btree_search(chave_titulo, false, titulo_busca, titulo_idx.rrn_raiz, &titulo_idx);
 
     if (!titulo_buscado)
         printf(ERRO_REGISTRO_NAO_ENCONTRADO);
@@ -1616,7 +1620,9 @@ void cadastrar_categoria_menu(char* titulo, char* categoria) {
 void atualizar_status_inscricoes_menu(char *id_usuario, char *titulo, char status) {
     /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
     char chave_titulo[TAM_CHAVE_TITULO_IDX + 1];
-    bool titulo_buscado = btree_search(chave_titulo, false, strupr(titulo), titulo_idx.rrn_raiz, &titulo_idx);
+    char titulo_busca[TAM_MAX_TITULO];
+    strupperpad(titulo_busca, titulo, TAM_MAX_TITULO - 1);
+    bool titulo_buscado = btree_search(chave_titulo, false, titulo_busca, titulo_idx.rrn_raiz, &titulo_idx);
 
     if (!titulo_buscado) {
         printf(ERRO_REGISTRO_NAO_ENCONTRADO);
@@ -1679,9 +1685,16 @@ void buscar_curso_id_menu(char *id_curso) {
 void buscar_curso_titulo_menu(char *titulo) {
     /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
     char chave[TAM_CHAVE_TITULO_IDX + 1];
+    char titulo_busca[TAM_MAX_TITULO];
+    strupperpad(titulo_busca, titulo, TAM_MAX_TITULO - 1);
     printf(RRN_NOS);
-    bool titulo_buscado = btree_search(chave, true, strupr(titulo), titulo_idx.rrn_raiz, &titulo_idx);
+    bool titulo_buscado = btree_search(chave, true, titulo_busca, titulo_idx.rrn_raiz, &titulo_idx);
     printf("\n");
+
+    if (!titulo_buscado) {
+        printf(ERRO_REGISTRO_NAO_ENCONTRADO);
+        return;
+    }
 
     bool exibiu = exibir_btree_titulo(chave);
 
@@ -1707,19 +1720,22 @@ void listar_cursos_categorias_menu(char *categoria) {
     }
 
     int primeiro_indice;
-    bool existe_categoria = inverted_list_secondary_search(&primeiro_indice, true, strupr(categoria), &categorias_idx);
+    char categoria_busca[TAM_MAX_CATEGORIA];
+    strupperpad(categoria_busca, categoria, categorias_idx.tam_chave_secundaria);
+    bool existe_categoria = inverted_list_secondary_search(&primeiro_indice, true, categoria_busca, &categorias_idx);
 
     if (!existe_categoria)
         printf(AVISO_NENHUM_REGISTRO_ENCONTRADO);
     else {
         int qtd_cursos_na_categoria = inverted_list_primary_search(NULL, false, primeiro_indice, NULL, &categorias_idx);
-        char ids[qtd_cursos_na_categoria][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX];
+        char ids[qtd_cursos_na_categoria][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX + 1];
 
         inverted_list_primary_search(ids, true, primeiro_indice, NULL, &categorias_idx); // populando o vetor 'ids' criado
 
         for (int i = 0; i < qtd_cursos_na_categoria; i++) {
             char chave_curso[TAM_CHAVE_CURSOS_IDX + 1];
             strncpy(chave_curso, ids[i], TAM_ID_CURSO - 1);
+            chave_curso[TAM_ID_CURSO - 1] = '\0';
             btree_search(chave_curso, false, chave_curso, cursos_idx.rrn_raiz, &cursos_idx);
             exibir_btree_curso(chave_curso);
         }
@@ -1864,7 +1880,7 @@ int order_inscricoes_idx(const void *key, const void *elem) {
 /* Função de comparação entre chaves do índice titulo_idx */
 int order_titulo_idx(const void *key, const void *elem) {
     /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
-    return strncmp((char*)key, (char*)elem, strlen((char*)key)); // strlen para que não seja preciso encher a string com '#' para comparação
+    return strncmp((char*)key, (char*)elem, TAM_MAX_TITULO - 1); // compara a chave normalizada com padding
 }
  
 /* Funções de comparação entre chaves do índice data_curso_usuario_idx */
@@ -1884,7 +1900,7 @@ int order_data_curso_usuario_idx(const void *key, const void *elem) {
 /* Função de comparação entre chaves do índice secundário de categorias_idx */
 int order_categorias_idx(const void *key, const void *elem) {
     /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
-    return strncmp((char*)key, (char*)elem, strlen((char*)key)); // strlen para que não seja preciso encher a string com '#' para comparação
+    return strncmp((char*)key, (char*)elem, TAM_CHAVE_CATEGORIAS_SECUNDARIO_IDX); // compara a chave normalizada com padding
 }
  
  
@@ -1892,7 +1908,9 @@ int order_categorias_idx(const void *key, const void *elem) {
 void inverted_list_insert(char *chave_secundaria, char *chave_primaria, inverted_list *t) {
     /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
     int primeiro_indice;
-    bool existe_categoria = inverted_list_secondary_search(&primeiro_indice, false, strupr(chave_secundaria), t);
+    char categoria_busca[TAM_MAX_CATEGORIA];
+    strupperpad(categoria_busca, chave_secundaria, t->tam_chave_secundaria);
+    bool existe_categoria = inverted_list_secondary_search(&primeiro_indice, false, categoria_busca, t);
 
     if (existe_categoria) {
         int ultimo_indice;
@@ -1906,8 +1924,7 @@ void inverted_list_insert(char *chave_secundaria, char *chave_primaria, inverted
     else {
         // inserindo novo registro de indice_secundario no final do arquivo e ordenando
         char temp[t->tam_chave_secundaria + 5];
-        strcpy(temp, chave_secundaria);
-        strpadright(temp, '#', t->tam_chave_secundaria);
+        strcpy(temp, categoria_busca);
         sprintf(temp + t->tam_chave_secundaria, "%04d", t->qtd_registros_primario);
         strcpy(t->arquivo_secundario + t->qtd_registros_secundario * (t->tam_chave_secundaria + 4), temp);
         t->qtd_registros_secundario++;
@@ -1940,7 +1957,7 @@ bool inverted_list_secondary_search(int *result, bool exibir_caminho, char *chav
     return false;
 }
  
-int inverted_list_primary_search(char result[][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX], bool exibir_caminho, int indice, int *indice_final, inverted_list *t) {
+int inverted_list_primary_search(char result[][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX + 1], bool exibir_caminho, int indice, int *indice_final, inverted_list *t) {
     /* <<< COMPLETE AQUI A IMPLEMENTAÇÃO >>> */
     int i = 0; // contador
 
@@ -1955,8 +1972,10 @@ int inverted_list_primary_search(char result[][TAM_CHAVE_CATEGORIAS_PRIMARIO_IDX
         if (exibir_caminho)
             printf(" %d", indice);
 
-        if (result)
+        if (result) {
             strncpy(result[i], chave_primaria, t->tam_chave_primaria);
+            result[i][t->tam_chave_primaria] = '\0';
+        }
 
         if (indice_final)
             *indice_final = indice;
@@ -1988,8 +2007,9 @@ bool inverted_list_binary_search(int* result, bool exibir_caminho, char *chave, 
         if (exibir_caminho)
             printf(" %d", m);
 
-        char p[t->tam_chave_secundaria];
+        char p[t->tam_chave_secundaria + 1];
         strncpy(p, t->arquivo_secundario + (m * (t->tam_chave_secundaria + 4)), t->tam_chave_secundaria);
+        p[t->tam_chave_secundaria] = '\0';
 
         cmp = t->compar(chave, p);
 
@@ -2438,7 +2458,7 @@ bool btree_print_in_order(char *chave_inicio, char *chave_fim, bool (*exibir)(ch
     int i = 0;
     for (; i < no.qtd_chaves; i++) {
         if (!no.folha)
-            imprimiu = btree_print_in_order(chave_inicio, chave_fim, exibir, no.filhos[i], t);
+            imprimiu = btree_print_in_order(chave_inicio, chave_fim, exibir, no.filhos[i], t) || imprimiu;
         if (!chave_inicio && !chave_fim) {
             exibir(no.chaves[i]);
             imprimiu = true;
@@ -2451,7 +2471,7 @@ bool btree_print_in_order(char *chave_inicio, char *chave_fim, bool (*exibir)(ch
     }
 
     if (!no.folha)
-        imprimiu = btree_print_in_order(chave_inicio, chave_fim, exibir, no.filhos[i], t);
+        imprimiu = btree_print_in_order(chave_inicio, chave_fim, exibir, no.filhos[i], t) || imprimiu;
 
     btree_node_free(no);
     return imprimiu;
@@ -2556,6 +2576,18 @@ char* strpadright(char *str, char pad, unsigned size) {
         str[i] = pad;
     str[size] = '\0';
     return str;
+}
+
+void strupperpad(char *dest, const char *src, unsigned size) {
+    unsigned i = 0;
+
+    for (; i < size && src[i] != '\0'; i++)
+        dest[i] = toupper((unsigned char)src[i]);
+
+    for (; i < size; i++)
+        dest[i] = '#';
+
+    dest[size] = '\0';
 }
 
 char *strupr(char *str) {

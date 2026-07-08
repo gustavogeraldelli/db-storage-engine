@@ -4,17 +4,17 @@ all: exec test
 
 test: exec
 	@ echo "Criando diretório para saídas..."
-	@ mkdir -p saidas
+	@ mkdir -p tests
 
 	@ echo "Testando..."
 	@ echo "Sua saída: <	Output: >"
-	@ $(foreach i, $(testes), ./exec < in/input$(i).txt > saidas/out$(i).txt;)
-	@ $(foreach i, $(testes), echo "Teste $(i)" && diff saidas/out$(i).txt out/output$(i).txt;)
+	@ $(foreach i, $(testes), ./exec < in/input$(i).txt > tests/out$(i).txt;)
+	@ $(foreach i, $(testes), echo "Teste $(i)" && diff tests/out$(i).txt out/output$(i).txt;)
 
 exec: T02.c
 	@ echo "Compilando o arquivo..."
 	@ gcc $< -o $@
 
 clean:
-	@ rm -rf saidas
+	@ rm -rf tests
 	@ rm -f exec
